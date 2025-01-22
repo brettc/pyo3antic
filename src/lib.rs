@@ -11,10 +11,17 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
     let schema_method: ImplItem = syn::parse_quote! {
         #[classmethod]
         fn __get_pydantic_core_schema__(
-            cls: &Bound<'_, PyType>,
-            _source_type: &Bound<'_, PyAny>,
-            _handler: &Bound<'_, PyAny>,
+            cls: &::pyo3::prelude::Bound<'_, ::pyo3::types::PyType>,
+            _source_type: &::pyo3::prelude::Bound<'_, PyAny>,
+            _handler: &::pyo3::prelude::Bound<'_, ::pyo3::types::PyAny>,
         ) -> PyResult<PyObject> {
+
+            // We can safely use here as this scope won't leak if they use the macro more than once
+            use pyo3::prelude::*;
+            use pythonize::{pythonize, depythonize};
+            use pyo3::types::*;
+            use pyo3::exceptions::PyValueError;
+
             Python::with_gil(|py| {
                 let core_schema = py.import("pydantic_core.core_schema")?.unbind();
                 let schema = core_schema.call_method1(
@@ -105,12 +112,6 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     // Generate the final output with necessary imports
     TokenStream::from(quote! {
-        use pyo3::prelude::*;
-        use pyo3::types::*;
-        use pythonize::{pythonize, depythonize};
-        use pyo3::types::{IntoPyDict, PyType, PyDict, PyList, PyTuple};
-        use pyo3::exceptions::PyValueError;
-
         #input_impl
     })
 }
