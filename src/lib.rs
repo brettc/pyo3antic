@@ -14,7 +14,7 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
             cls: &::pyo3::prelude::Bound<'_, ::pyo3::types::PyType>,
             _source_type: &::pyo3::prelude::Bound<'_, PyAny>,
             _handler: &::pyo3::prelude::Bound<'_, ::pyo3::types::PyAny>,
-        ) -> PyResult<PyObject> {
+        ) -> PyResult<Py<PyAny>> {
 
             // We can safely use here as this scope won't leak if they use the macro more than once
             use pyo3::prelude::*;
@@ -22,7 +22,7 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
             use pyo3::types::*;
             use pyo3::exceptions::PyValueError;
 
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let core_schema = py.import("pydantic_core.core_schema")?.unbind();
                 let schema = core_schema.call_method1(
                     py,
@@ -51,7 +51,7 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
                                   _kwargs: Option<&Bound<'_, PyDict>>|
                  -> PyResult<Py<#ty>> {
                     let value = args.get_item(0)?;
-                    Python::with_gil(|py| {
+                    Python::attach(|py| {
                         if value.is_instance_of::<#ty>() {
                             Ok(Py::new(py, value.extract::<#ty>()?)?)
                         } else {
@@ -70,7 +70,7 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
                                    _kwargs: Option<&Bound<'_, PyDict>>|
                  -> PyResult<Py<PyAny>> {
                     let value = args.get_item(0)?;
-                    Python::with_gil(|py| {
+                    Python::attach(|py| {
                         match value.extract::<#ty>() {
                             Ok(instance) => match pythonize(py, &instance) {
                                 Ok(py_dict) => Ok(py_dict.unbind()),
