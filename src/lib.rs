@@ -2,9 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, ImplItem, ItemImpl};
 
-#[proc_macro_attribute]
-pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
-    let mut input_impl = parse_macro_input!(input as ItemImpl);
+fn expand_with_pydantic_schema(mut input_impl: ItemImpl) -> ItemImpl {
     let ty = &input_impl.self_ty;
 
     // Create the pydantic schema method
@@ -18,9 +16,8 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
             // We can safely use here as this scope won't leak if they use the macro more than once
             use pyo3::prelude::*;
-            use pythonize::{pythonize, depythonize};
             use pyo3::types::*;
-            use pyo3::exceptions::PyValueError;
+            use pythonize::{depythonize, pythonize};
 
             Python::attach(|py| {
                 let core_schema = py.import("pydantic_core.core_schema")?.unbind();
@@ -37,18 +34,25 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
                                 (),
                                 Some(
                                     &[
-                                        ("keys_schema", core_schema.call_method0(py, "str_schema")?),
-                                        ("values_schema", core_schema.call_method0(py, "any_schema")?),
+                                        (
+                                            "keys_schema",
+                                            core_schema.call_method0(py, "str_schema")?,
+                                        ),
+                                        (
+                                            "values_schema",
+                                            core_schema.call_method0(py, "any_schema")?,
+                                        ),
                                     ]
                                     .into_py_dict(py)?,
                                 ),
                             )?,
+                            core_schema.call_method0(py, "str_schema")?,
                         ],
                     )?,),
                 )?;
 
                 let validate_fun = |args: &Bound<'_, PyTuple>,
-                                  _kwargs: Option<&Bound<'_, PyDict>>|
+                                    _kwargs: Option<&Bound<'_, PyDict>>|
                  -> PyResult<Py<#ty>> {
                     let value = args.get_item(0)?;
                     Python::attach(|py| {
@@ -67,7 +71,7 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
                 let validate = PyCFunction::new_closure(py, None, None, validate_fun).unwrap();
 
                 let serialize_fun = |args: &Bound<'_, PyTuple>,
-                                   _kwargs: Option<&Bound<'_, PyDict>>|
+                                     _kwargs: Option<&Bound<'_, PyDict>>|
                  -> PyResult<Py<PyAny>> {
                     let value = args.get_item(0)?;
                     Python::attach(|py| {
@@ -109,9 +113,40 @@ pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
 
     // Add the schema method to the existing implementation items
     input_impl.items.push(schema_method);
+    input_impl
+}
 
-    // Generate the final output with necessary imports
+#[proc_macro_attribute]
+pub fn pydantic_schema(_attr: TokenStream, input: TokenStream) -> TokenStream {
+    let input_impl = parse_macro_input!(input as ItemImpl);
+    let expanded = expand_with_pydantic_schema(input_impl);
     TokenStream::from(quote! {
-        #input_impl
+        #expanded
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quote::ToTokens;
+
+    #[test]
+    fn generated_schema_supports_dict_and_str_inputs() {
+        let input: ItemImpl = syn::parse_quote! {
+            #[pymethods]
+            impl Example {
+                fn existing(&self) {}
+            }
+        };
+
+        let expanded = expand_with_pydantic_schema(input);
+        let out = expanded.into_token_stream().to_string();
+
+        // Struct-like inputs continue to work.
+        assert!(out.contains("dict_schema"));
+        // Enum-like unit variants can now validate from strings.
+        assert!(out.contains("str_schema"));
+        // Preserve existing path: already-constructed instances are valid.
+        assert!(out.contains("is_instance_schema"));
+    }
 }
